@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Space Cat</title>
+	</head>
+
+	<body>
+		<p align="center">
+			<canvas id="gameCanvas" style="background:#220000" width="700" height="500" align="right"></canvas>
+		</p>
+
+		<audio id="jump">
+			<source src = "Jump.mp3">
+		</audio>
+
+		<audio id="gameMusic">
+			<source src = "SpaceMusic.mp3">
+		</audio>
+
+		<audio id="explode">
+			<source src = "explode.wav">
+		</audio>
+
+		<audio id="laser">
+			<source src = "laser.wav">
+		</audio>
+
+		<audio id="hitGround">
+			<source src = "hit.wav">
+		</audio>
+
+		<script>
+			var requestAnimationFrame = window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimationFrame;
+			window.requestAnimationFrame = requestAnimationFrame;
+			
+			//Game Canvas
+			var canvas = document.getElementById("gameCanvas");
+			var width = 1600;
+			var height = 900;
+			var ctx = canvas.getContext("2d");
+
+			//Player Variables
+			var player;
+			var jumpModifier = 5;
+			var playerHealth = 3;
+			var playerScore = 0;
+			var finalScore;
+			var playerBullet;
+			var directionFired;
+			var bulletFired = false; 
+
+			//Jumping Logic
+			var playerFalling = true;
+			var playerOnGround = false;
+			var playerJumping = false;
+			var playerCanJump = false;
+
+			//Enemy Variables
+			var enemies = [];
+			var newEnemySpawnX;
+			var newEnemySpawnY;
+			var explosions = [];
+			var enemiesPerSecond = 1;
+			var enemyHit = [];
+
+			//Game Logic
+			const gameStates = {
+				STARTSCREEN: 'startscreen',
+				GAME: 'maingame',
+				GAMEOVER: 'gameover'
+			};
+
+			let currentGameState = gameStates.startScreen;
+			var keys = [];
+
+			var gradient;
+
+			var timerActive = false;
+
+			//Level Variables
+			let shortPlatform = [];
+			let longPlatform = [];
+			var bottomPlatform;
+			var levelBorder;
+			var Background1;
+			var Background2;
+			var Foreground1;
+			var Foreground2;
+			var scrollSpeed = 0.15;
+
+			//Sprite Sheets
+			var explosionsSpriteSheet = [];
+			var enemySpriteSheet = [];
+			var laserSpriteSheet;
+
+
+			var enemySpawnInterval;
+			var enemyIncreaseDifficulty;
+
+			class gameObject
+			{
+				constructor(positionX, positionY, imageSource, spriteWidth, spriteHeight, velocityX, velocityY, gravity, gravitySpeed, friction)
+				{
+					this.positionX = positionX;
+					this.positionY = positionY;
+					this.image = new Image();
+					this.image.src = imageSource;
+					this.spriteWidth = spriteWidth;
+					this.spriteHeight = spriteHeight;
+					this.velocityX = velocityX;
+					this.velocityY = velocityY;
+					this.gravity = gravity;
+					this.gravitySpeed = gravitySpeed;
+					this.friction = friction;
+				}
+
+				applyGravity()
+				{
+					//Enable Gravity
+					this.gravitySpeed += this.gravity;
+					this.positionY += this.velocityY + this.gravitySpeed;
+				}
+
+				applyMovement()
+				{
+					//Enable Movement
+					this.velocityX *= this.friction;
+					this.positionX += this.velocityX;
+				}
+
+				renderObject()
+				{
+					ctx.rect(this.positionX, this.positionY, this.spriteWidth, this.spriteHeight);
+					ctx.drawImage(this.image, this.positionX, this.positionY, this.spriteWidth, this.spriteHeight);
+				}
+			}
+
+			class animatedSprite
+			{
+				constructor(startTimeMS, frameX, frameXMax, frameY, frameYMax, frame, frameMax, frameTimer, frameTimerMax, spriteWidth, spriteHeight, animationCompleted)
+				{
+					this.startTimeMS = startTimeMS;
+					this.frameX = frameX;
+					this.frameXMax = frameXMax;
+					this.frameY = frameY;
+					this.frameYMax = frameYMax;
+					this.frame = frame;
+					this.frameMax = frameMax;
+					this.frameTimer = frameTimer;
+					this.frameTimerMax = frameTimerMax;
+					this.spriteWidth = spriteWidth;
+					this.spriteHeight = spriteHeight;
+					this.animationCompleted = animationCompleted;
+				}
+
+				animationFrame()
+				{
+					this.animationCompleted = false;
+					var elapsed = (Date.now() - this.startTimeMS)/1000;
+					this.startTimeMS = Date.now();
+
+					//Only update frames when timer is below 0
+					this.frameTimer = this.frameTimer - elapsed;
+					if(this.frameTimer <= 0)
+					{
+						this.frameTimer = this.frameTimerMax;
+						this.frameX++;
+
+						if (this.frameX > this.frameXMax)
+						{
+			  				this.frameX = 0;
+			  				this.frameY++;
+
+			  				//end of row, move down to next row in sheet
+			  				if(this.frameY > this.frameYMax)
+			  				{
+				  				this.frameY = 0;
+			  				}
+						}
+					}
+					this.frame++;
+
+					//reset frames to 0 in event that there are empty spaces on sprite sheet
+					if(this.frame > this.frameMax || this.animationCompleted)
+					{
+			 			this.frame = 0;
+			 			this.frameX = 0;
+			 			this.frameY = 0;
+			 			this.animationCompleted = true;
+					}
+				}
+			}	
+
+			window.addEventListener("load", function() {start(); update();});
+
+			function start() 
+			{
+				currentGameState = gameStates.STARTSCREEN;
+
+				canvas.width = width;
+				canvas.height = height;
+
+				jump.volume = 0.15;
+				gameMusic.volume = 0.3;
+				laser.volume = 0.15;
+				explode.volume = 0.15;
+				hitGround.volume = 0.2;
+
+				gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+				gradient.addColorStop("0"," blue");
+				gradient.addColorStop("0.5", "cyan");
+				gradient.addColorStop("1.0", "blue");
+
+				initObjects();
+				initSpriteSheets();
+			}
+
+			function initObjects()
+			{
+				player = new gameObject(150, 50, "spacecat.png", 50, 75, 0, 0, 0.05, 0, 0.8);
+				playerBullet = new gameObject(0, 0, "laserSheet.png", 48, 48, 0, 0, 0, 0, 0.8)
+
+				Background1 = new gameObject(0, 0, "Background1.png", 1600, 900, 0, 0, 0, 0, 0);
+				Background2 = new gameObject(1600, 0, "Background1.png", 1600, 900, 0, 0, 0, 0, 0);
+
+				Foreground1 = new gameObject(0, 0, "Foreground2.png", 1600, 900, 0, 0, 0, 0, 0);
+				Foreground2 = new gameObject(-1600, 0, "Foreground2.png", 1600, 900, 0, 0, 0, 0, 0);
+
+				levelBorder = new gameObject(0, 0, "GameBorder.png", 1600, 900, 0, 0, 0, 0, 0);
+
+				for (var i = 0; i < 4; i++) 
+				{		
+					longPlatform.push(new gameObject(0, 0, "satelliteLongPlatform.png", 400, 50, 0, 0, 0.05, 0, 0.8));
+				}	
+
+				for (var i = 0; i < 6; i++) 
+				{		
+					shortPlatform.push(new gameObject(0, 0, "satelliteShortPlatform.png", 200, 50, 0, 0, 0.05, 0, 0.8));
+				}
+
+				bottomPlatform = new gameObject(canvas.width/2-200, canvas.height-50, "satelliteLongPlatform.png", 400, 50, 0, 0, 0.05, 0, 0.8);
+
+				//Long Platform Coords
+				longPlatform[0].positionX = 100; longPlatform[0].positionY = 230;
+				longPlatform[1].positionX = 1100; longPlatform[1].positionY = 230;
+				longPlatform[2].positionX = 100; longPlatform[2].positionY = 630;
+				longPlatform[3].positionX = 1100; longPlatform[3].positionY = 630;
+
+				//Short Platform Coords
+				shortPlatform[0].positionX = 700; shortPlatform[0].positionY = 230;
+				shortPlatform[1].positionX = 100; shortPlatform[1].positionY = 430;
+				shortPlatform[2].positionX = 500; shortPlatform[2].positionY = 430;
+				shortPlatform[3].positionX = 900; shortPlatform[3].positionY = 430;
+				shortPlatform[4].positionX = 1300; shortPlatform[4].positionY = 430;
+				shortPlatform[5].positionX = 700; shortPlatform[5].positionY = 630;
+			}
+
+			function initSpriteSheets()
+			{
+				laserSpriteSheet = new animatedSprite(0, 0, 8, 0, 1, 0, 8, 0, 0.007, 48, 48, false);
+			}
+
+			function backgroundScroll()
+			{
+				Background1.renderObject();
+				Background2.renderObject();
+				Foreground1.renderObject();
+				Foreground2.renderObject();
+
+				Background1.applyMovement();
+				Background2.applyMovement();
+				Foreground1.applyMovement();
+				Foreground2.applyMovement();
+
+				Background1.positionX -= scrollSpeed;
+				Background2.positionX -= scrollSpeed;
+
+				if (Background1.positionX + Background1.spriteWidth < 0)
+				{
+					Background1.positionX = Background2.positionX + Background2.spriteWidth;
+				}
+				if (Background2.positionX + Background2.spriteWidth < 0)
+				{
+					Background2.positionX = Background1.positionX + Background1.spriteWidth;
+				}
+
+				Foreground1.positionX += scrollSpeed;
+				Foreground2.positionX += scrollSpeed;
+
+				if (Foreground1.positionX > width)
+				{
+					Foreground1.positionX = Foreground2.positionX - Foreground2.spriteWidth;
+				}
+				if (Foreground2.positionX > width)
+				{
+					Foreground2.positionX = Foreground1.positionX - Foreground1.spriteWidth;
+				}
+			}
+
+			function startScreen()
+			{
+				if(keys[32])
+				{
+					currentGameState = gameStates.GAME;
+				}
+
+				playerScore = 0;
+
+				ctx.font = "30px OCR A Std, monospace";
+
+				// Fill with gradient
+				ctx.fillStyle = gradient;
+				ctx.fillText("You are the Space Cat!", canvas.width/2, canvas.height/6);
+				ctx.fillText("Use left and right arrows to move. Use up arrow to jump. Use A and D to fire.", canvas.width/2, canvas.height/3);
+				ctx.fillText("Avoid and blast the evil robots!", canvas.width/2, canvas.height/2);
+				ctx.fillText("Press Space to start", canvas.width/2, canvas.height/1.25);
+				ctx.textAlign = "center";
+			}
+
+			function update() 
+			{
+				ctx.clearRect(0, 0, width, height);
+
+				backgroundScroll();
+
+				switch(currentGameState)
+				{
+					case gameStates.STARTSCREEN:
+						startScreen();
+					break;
+
+					case gameStates.GAME:
+						mainGame();
+					break;
+
+					case gameStates.GAMEOVER:
+						gameOver();
+					break;
+				}
+
+				requestAnimationFrame(update);
+			}
+
+			var dir;
+			function mainGame()
+			{
+				gameMusic.play();
+
+				if (!timerActive) //Only happens once upon mainGame() call
+				{
+					player.positionX = 150; //Respawn Player
+					player.positionY = 50; 
+
+					enemies.length = 0; //Delete all Enemies
+
+					enemiesPerSecond = 1;
+					bulletFired = false;
+
+					//Every 3 seconds an enemy will spawn
+					enemySpawnInterval = setInterval(function() 
+					{	
+						spawnEnemy();
+
+						decideEnemySpawn();
+
+					}, 3000);
+
+					//Every 9 seconds an enemy will spawn and add one more enemy to spawn every time this code runs
+					enemyIncreaseDifficulty = setInterval(function() 
+					{	
+						for (var i = 0; i < enemiesPerSecond; i++) 
+						{
+							spawnEnemy();
+
+							decideEnemySpawn();
+						}
+
+						enemiesPerSecond += 1;
+
+					}, 9000);
+
+					timerActive = true;
+				}
+
+				playerBehaviour();
+
+				ctx.font = "30px OCR A Std, monospace";
+				ctx.fillStyle = "white";
+				ctx.fillText("Score: " + playerScore, 100, 95);
+				ctx.textAlign = "left";
+
+				//Player on Platform
+				if (!playerFalling && playerOnGround)
+				{
+					if (!playerJumping)
+					{
+						player.velocityY = 0;
+						player.gravitySpeed = 0;
+					}
+					
+					playerCanJump = true;
+				}
+
+				//Player is Falling
+				if (playerFalling)
+				{
+					player.gravity = 0.05;
+					player.applyGravity();
+					playerJumping = false;
+					playerCanJump = false;
+				}
+
+				if (dir === null)
+				{
+					playerFalling = true;
+				}
+
+				for (var i = 0; i < shortPlatform.length; i++) 
+				{
+					shortPlatform[i].renderObject();
+
+					//Check if player colliding with any short platform
+					dir = colCheck(player, shortPlatform[i]);
+					stopPlayerFalling();
+				}
+
+				for (var x = 0; x < longPlatform.length; x++) 
+				{
+					longPlatform[x].renderObject();
+
+					//Check if player colliding with any long platform
+					dir = colCheck(player, longPlatform[x]);
+					stopPlayerFalling(); 
+				}
+
+				bottomPlatform.renderObject();
+				dir = colCheck(player, bottomPlatform);
+				stopPlayerFalling();
+
+				bulletBehaviour();
+				enemyBehaviour();
+
+				if (player.positionY > height + 1000)
+				{
+					currentGameState = gameStates.GAMEOVER;
+				}
+			}
+
+			function stopPlayerFalling()
+			{
+				if (dir === "t")
+				{
+					playerFalling = false;
+					playerOnGround = true;
+				}
+			}
+
+			function decideEnemySpawn()
+			{
+				//SPAWN ALONG Y AXIS
+				newEnemySpawnY = randomIntFromInterval(-100, 1700);
+
+				if ((newEnemySpawnY > -100 && newEnemySpawnY < 0) || (newEnemySpawnY > 900 && newEnemySpawnY < 1000))
+				{
+					//Spawn in top or bottom border
+					newEnemySpawnX = randomIntFromInterval(-100,1700);			
+				}
+
+				if (newEnemySpawnY > 0 && newEnemySpawnY < 900)
+				{
+					//Spawn in left or right border
+					var LeftOrRight = randomIntFromInterval(1, 2);
+
+					if(LeftOrRight == 1) //Spawn on Left
+					{
+						newEnemySpawnX = randomIntFromInterval(-100, 0);
+					}
+
+					if(LeftOrRight == 2) //Spawn on Right
+					{
+						newEnemySpawnX = randomIntFromInterval(1600, 1700);
+					}
+				}		
+			}
+
+			function spawnEnemy()
+			{
+				enemies.push(new gameObject(newEnemySpawnX, newEnemySpawnY, "spacerobotsheet.png", 72, 100, 0, 0, 0, 0, 0.8));
+			}
+
+			function enemyBehaviour()
+			{
+				for (let i = 0; i < enemies.length; i++) 
+				{
+					enemies[i].applyMovement();
+
+					enemySpriteSheet.push(new animatedSprite(0, 0, 23, 0, 1, 0, 23, 0.05, 0.017, 72, 100, false));
+					enemySpriteSheet[i].animationFrame();
+					ctx.rect(enemies[i].positionX, enemies[i].positionY, enemies[i].spriteWidth, enemies[i].spriteHeight);
+					ctx.drawImage(enemies[i].image, enemySpriteSheet[i].spriteWidth*enemySpriteSheet[i].frameX, enemySpriteSheet[i].spriteHeight*enemySpriteSheet[i].frameY, enemySpriteSheet[i].spriteWidth, enemySpriteSheet[i].spriteHeight, enemies[i].positionX, enemies[i].positionY, enemies[i].spriteWidth, enemies[i].spriteHeight);
+
+					enemies[i].velocityY *= enemies[i].friction;
+					enemies[i].positionY += enemies[i].velocityY;
+
+					var dx = player.positionX - enemies[i].positionX;
+					var dy = player.positionY - enemies[i].positionY;
+
+					if (dx * dx > 500) 
+					{
+						enemies[i].velocityX = dx * 0.005;
+					}
+
+					if (dy * dy > 1000) 
+					{	
+						enemies[i].velocityY = dy * 0.005;
+					}
+
+					if (colCheck(player, enemies[i]))
+					{
+						currentGameState = gameStates.GAMEOVER;
+					}
+				}
+			}
+
+			function playerBehaviour()
+			{
+				player.applyMovement();
+				player.renderObject();
+
+				//Right arrow
+				if (keys[39]) 
+				{
+					player.velocityX++;
+				}
+
+				//Left arrow
+				if (keys[37]) 
+				{
+					player.velocityX--;
+				}
+
+				//Up arrow
+				if (keys[38] && playerOnGround && !playerFalling && !playerJumping)
+				{
+					playerJumping = true;
+					player.velocityY -= jumpModifier;
+					jump.play();
+				}
+
+				//Fire Left
+				if (keys[65] && !bulletFired) 
+				{
+					laser.play();
+					bulletFired = true;
+					directionFired = "left";
+
+					playerBullet.positionX = player.positionX + (player.spriteWidth / 2) - (playerBullet.spriteWidth / 2);
+					playerBullet.positionY = player.positionY + (player.spriteHeight / 2) - (playerBullet.spriteHeight / 2);
+				}
+
+				//Fire Right
+				if (keys[68] && !bulletFired) 
+				{
+					laser.play();
+					bulletFired = true;
+					directionFired = "right";
+
+					playerBullet.positionX = player.positionX + (player.spriteWidth / 2) - (playerBullet.spriteWidth / 2);
+					playerBullet.positionY = player.positionY + (player.spriteHeight / 2) - (playerBullet.spriteHeight / 2);
+				}
+			}
+
+			function bulletBehaviour()
+			{
+				if (bulletFired)
+				{
+					playerBullet.applyMovement();
+
+					laserSpriteSheet.animationFrame();
+					ctx.rect(playerBullet.positionX, playerBullet.positionY, playerBullet.spriteWidth, playerBullet.spriteHeight);
+					ctx.drawImage(playerBullet.image, laserSpriteSheet.spriteWidth*laserSpriteSheet.frameX, laserSpriteSheet.spriteHeight*laserSpriteSheet.frameY, laserSpriteSheet.spriteWidth, laserSpriteSheet.spriteHeight, playerBullet.positionX, playerBullet.positionY, playerBullet.spriteWidth, playerBullet.spriteHeight);
+
+					switch(directionFired)
+					{
+						case "left":
+							playerBullet.velocityX--;
+						break;
+
+						case "right":
+							playerBullet.velocityX++;
+						break;
+
+						default:
+							playerBullet.velocityX = 0;
+						break;
+					}
+
+					for (let i = 0; i < enemies.length; i++) 
+					{
+						if (colCheck(playerBullet, enemies[i]))
+						{
+							explode.play();
+							bulletFired = false;
+							playerScore += 100;
+
+							enemyHit[i] = true;
+						}
+					}
+
+					if (playerBullet.positionX > (width + playerBullet.spriteWidth) || playerBullet.positionX < (0 - playerBullet.spriteWidth))
+					{
+						bulletFired = false;
+
+					}
+
+					if (colCheck(playerBullet, bottomPlatform))
+					{
+						hitGround.play();
+						bulletFired = false;
+					}
+
+					for (let i = 0; i < longPlatform.length; i++) 
+					{
+						if (colCheck(playerBullet, longPlatform[i]))
+						{
+							hitGround.play();
+							bulletFired = false;
+						}	
+
+					}
+
+					for (let i = 0; i < shortPlatform.length; i++) 
+					{
+						if (colCheck(playerBullet, shortPlatform[i]))
+						{
+							hitGround.play();
+							bulletFired = false;
+						}	
+
+					}
+				}
+				
+				for (let i = 0; i < enemies.length; i++) 
+				{
+					if (enemyHit[i])
+					{
+						explosions.push(new gameObject(enemies[i].positionX + (enemies[i].spriteWidth / 2) - 48, enemies[i].positionY + (enemies[i].spriteWidth / 2) - 48, "explosionSheet.png", 96, 96, 0, 0, 0, 0, 0));
+
+						explosionsSpriteSheet.push(new animatedSprite(0, 0, 12, 0, 1, 0, 12, 0.05, 0.017, 96, 96, false));
+
+						enemies.splice(i, 1);
+					}
+
+					for (let y = 0; y < explosions.length; y++) 
+						{
+							if (!explosionsSpriteSheet[y].animationCompleted)
+							{
+								explosionsSpriteSheet[y].animationFrame();
+								ctx.rect(explosions[y].positionX, explosions[y].positionY, explosions[y].spriteWidth, explosions[y].spriteHeight);
+								ctx.drawImage(explosions[y].image, explosionsSpriteSheet[y].spriteWidth*explosionsSpriteSheet[y].frameX, explosionsSpriteSheet[y].spriteHeight*explosionsSpriteSheet[y].frameY, explosionsSpriteSheet[y].spriteWidth, explosionsSpriteSheet[y].spriteHeight, explosions[y].positionX, explosions[y].positionY, explosions[y].spriteWidth, explosions[y].spriteHeight);
+							}
+
+							enemyHit[i] = false;
+
+						}
+				}
+
+			}
+
+			function gameOver()
+			{
+				clearInterval(enemySpawnInterval);
+				clearInterval(enemyIncreaseDifficulty);
+
+				timerActive = false;
+				enemiesPerSecond = 1;
+
+				if(keys[32])
+				{
+					currentGameState = gameStates.STARTSCREEN;
+				}
+
+				finalScore = playerScore;
+
+				ctx.font = "30px Arial";
+
+				// Fill with gradient
+				ctx.fillStyle = gradient;
+
+				ctx.fillText("Game Over! Your score is " + finalScore, canvas.width/2, canvas.height/3);
+				ctx.fillText("Press Space to restart!", canvas.width/2, canvas.height/2);
+				ctx.textAlign = "center";
+			}
+
+			function randomIntFromInterval(min, max) 
+			{ 
+				// min and max included 
+  				return Math.floor(Math.random() * (max - min + 1) + min);
+			}
+
+			function colCheck(shapeA,shapeB) 
+			{
+				//get vectors to check against
+				var vX = (shapeA.positionX + (shapeA.spriteWidth / 2)) - (shapeB.positionX + (shapeB.spriteWidth / 2)),
+				vY = (shapeA.positionY + (shapeA.spriteHeight / 2)) - (shapeB.positionY + (shapeB.spriteHeight / 2)),
+
+				// add the half widths and half heights of the objects
+				hWidths = (shapeA.spriteWidth / 2) + (shapeB.spriteWidth / 2),
+				hHeights = (shapeA.spriteHeight / 2) + (shapeB.spriteHeight / 2);
+				var colDir = null;
+				// if the x and y vector are less than the half width or half height, they we must be inside the object, causing a collision
+				if (Math.abs(vX) < hWidths && Math.abs(vY) < hHeights) 
+				{
+					// figures out on which side we are colliding (top, bottom, left, or right)
+					var oX = hWidths - Math.abs(vX),
+						oY = hHeights - Math.abs(vY);
+					if (oX >= oY) 
+					{
+						if (vY > 0) 
+						{
+							colDir = "b";
+							shapeA.positionY += oY;
+						} 
+						else 
+						{					
+							colDir = "t";
+							shapeA.positionY -= oY;
+						}
+					} 
+					else
+					{
+						if (vX > 0) 
+						{
+							colDir = "l";
+							shapeA.positionX += oX;
+						} 
+						else 
+						{
+							colDir = "r";
+							shapeA.positionX -= oX;
+						}
+					}
+				}	
+
+				return colDir;
+			}
+
+			document.body.addEventListener("keydown", function (e) 
+			{
+				keys[e.keyCode] = true;
+
+				isKeyPressed = true;
+			});
+
+			document.body.addEventListener("keyup", function (e) 
+			{
+				keys[e.keyCode] = false;
+
+				isKeyPressed = false;
+			});
+
+		</script>
+	</body>
+</html>
